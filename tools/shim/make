@@ -1,0 +1,5 @@
+#!/bin/sh
+# Project-local make for building the OCaml toolchain under _tools/ only
+# (explicit exception from the user; never used for WebKit). Low priority,
+# job count capped by OPAMJOBS/-j from the caller.
+exec nice -n 10 /usr/bin/make "$@"

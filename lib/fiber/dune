@@ -1,0 +1,3 @@
+(library
+ (name fiber)
+ (libraries js_of_ocaml jspi mode))

@@ -1,0 +1,4 @@
+(executable
+ (name main)
+ (modes wasm)
+ (libraries js_of_ocaml uucp uunf uunf.string))

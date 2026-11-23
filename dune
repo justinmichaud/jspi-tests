@@ -1,0 +1,70 @@
+;; Build profiles are <flavour>-<effects>; tools/build.sh builds each into its
+;; own build dir.
+;;
+;; release-*: whole-program, full Binaryen optimisation (--opt=3), no source
+;;            maps or debug info. This is the build that gets timed.
+;; debug-*:   separate compilation (many Wasm modules), debug info, pretty
+;;            output and inline source maps carrying the OCaml sources.
+;;            For profiling and debugging; never timed.
+
+(env
+ (release-jspi
+  (flags (:standard -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=jspi --opt=3))
+   (build_runtime_flags (:standard --effects=jspi))
+   (link_flags (:standard))
+   (compilation_mode whole_program)
+   (sourcemap no)))
+ (debug-jspi
+  (flags (:standard -g -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=jspi --debug-info --pretty))
+   (build_runtime_flags (:standard --effects=jspi --debug-info --pretty))
+   (compilation_mode separate)
+   (sourcemap inline)))
+ (release-cps
+  (flags (:standard -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=cps --opt=3))
+   (build_runtime_flags (:standard --effects=cps))
+   (link_flags (:standard))
+   (compilation_mode whole_program)
+   (sourcemap no)))
+ (debug-cps
+  (flags (:standard -g -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=cps --debug-info --pretty))
+   (build_runtime_flags (:standard --effects=cps --debug-info --pretty))
+   (compilation_mode separate)
+   (sourcemap inline)))
+ (release-native
+  (flags (:standard -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=native --opt=3))
+   (build_runtime_flags (:standard --effects=native))
+   (link_flags (:standard))
+   (compilation_mode whole_program)
+   (sourcemap no)))
+ (debug-native
+  (flags (:standard -g -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=native --debug-info --pretty))
+   (build_runtime_flags (:standard --effects=native --debug-info --pretty))
+   (compilation_mode separate)
+   (sourcemap inline)))
+ (release-none
+  (flags (:standard -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=disabled --opt=3))
+   (build_runtime_flags (:standard --effects=disabled))
+   (link_flags (:standard))
+   (compilation_mode whole_program)
+   (sourcemap no)))
+ (debug-none
+  (flags (:standard -g -w +a-4-9-40-41-42-44-45-70))
+  (wasm_of_ocaml
+   (flags (:standard --effects=disabled --debug-info --pretty))
+   (build_runtime_flags (:standard --effects=disabled --debug-info --pretty))
+   (compilation_mode separate)
+   (sourcemap inline))))

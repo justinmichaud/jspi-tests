@@ -1,0 +1,11 @@
+; The build profile is "<flavour>-<effects>", e.g. release-jspi, debug-native.
+; Programs read the effects backend from it at run time, so one source tree
+; serves every mode.
+
+(library
+ (name mode))
+
+(rule
+ (with-stdout-to
+  profile.ml
+  (echo "let profile = \"%{profile}\"\n")))

@@ -1,0 +1,8 @@
+(library
+ (name jspi)
+ (libraries js_of_ocaml)
+ (js_of_ocaml
+  (javascript_files jspi.js))
+ (wasm_of_ocaml
+  (javascript_files jspi.js)
+  (wasm_files jspi.wat)))

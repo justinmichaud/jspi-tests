@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSPI bench runner</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; } }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, monospace; margin: 16px; }
+  #status { color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<div id="status">loading…</div>
+<pre id="result"></pre>
+<script src="common.js"></script>
+<script>
+"use strict";
+// run.html?w=switch|await|app&profile=release-jspi&<knobs>
+// Everything is served from the repo root by tools/serve.py (loopback only).
+(async function () {
+  const raw = Object.fromEntries(new URLSearchParams(location.search));
+  const params = raw.w ? applyPreset(raw.w, raw) : raw;
+  const root = new URL("../", location.href);
+  const status = document.getElementById("status");
+  const done = async (kind, payload) => {
+    status.textContent = kind;
+    document.getElementById("result").textContent = payload;
+    document.title = kind;
+    if (params.post) {
+      await fetch(new URL("/result", root), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, payload, ua: navigator.userAgent, isolated: globalThis.crossOriginIsolated === true, params }),
+      });
+    }
+  };
+  try {
+    const w = params.w, profile = params.profile;
+    if (!w || !profile) throw new Error("need ?w=<workload>&profile=<profile>");
+    // Corpus loading for the benches happens here, before the program starts.
+    // The app fetches its own documents (that is part of what it measures).
+    let docs = [];
+    if (w !== "app") {
+      const manifest = await (await fetch(new URL("corpus/manifest.json", root))).json();
+      const n = Math.min(+(params.docs || 200), manifest.docs.length);
+      docs = await Promise.all(manifest.docs.slice(0, n).map(
+        async (d) => (await fetch(new URL("corpus/" + d.path, root))).text()));
+    }
+    const bench = makeBench({
+      params, docs,
+      now: () => performance.now(),
+      toEpoch: (t) => performance.timeOrigin + t,
+      report: (s) => { const o = JSON.parse(s); o.params = params; o.spans = bench.spans; done("done", JSON.stringify(o)); },
+      fail: (s) => { done("failed", s); },
+      env: { kind: "browser", ua: navigator.userAgent, isolated: globalThis.crossOriginIsolated === true },
+    });
+    if ((w === "await" || w === "micro") && (!params.test || params.test === "all" || params.test === "module-load")) {
+      // Default: the largest module of an app build (none mode has no app).
+      // Always the same bytes (release-jspi's app), so checksums match across modes.
+      let dir = params.module || "dist/release-jspi/app";
+      let resp = await fetch(new URL(dir + "/wasm-files.json", root));
+      if (!resp.ok && !params.module) { dir = "dist/release-jspi/app"; resp = await fetch(new URL(dir + "/wasm-files.json", root)); }
+      const files = await resp.json();
+      let best = null;
+      for (const f of files) {
+        const b = new Uint8Array(await (await fetch(new URL(`${dir}/main.bc.wasm.assets/${f}`, root))).arrayBuffer());
+        if (!best || b.byteLength > best.byteLength) best = b;
+      }
+      bench.helpers.wasmBytes = best;
+    }
+    globalThis.__bench = bench;
+    if (params.hold) {
+      // tools/profile.py attaches samply to this renderer, then releases us.
+      status.textContent = "waiting for profiler";
+      await fetch(new URL("/go", root));
+    }
+    status.textContent = "running";
+    bench.bootStart = performance.now();
+    const s = document.createElement("script");
+    s.src = new URL(`dist/${profile}/${w}/main.bc.wasm.js`, root).href;
+    s.onerror = () => done("failed", "could not load " + s.src);
+    window.addEventListener("unhandledrejection", (e) => done("failed", String(e.reason?.stack || e.reason)));
+    window.addEventListener("error", (e) => done("failed", String(e.error?.stack || e.message)));
+    document.body.appendChild(s);
+  } catch (e) {
+    done("failed", String(e.stack || e));
+  }
+})();
+</script>
+</body>
+</html>

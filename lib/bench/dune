@@ -1,0 +1,3 @@
+(library
+ (name bench)
+ (libraries js_of_ocaml mode hash))
