@@ -179,8 +179,13 @@ def main():
     # Each run adds about the same number of samples per section: estimate
     # how many more runs the thinnest section needs, add them, re-stitch.
     while True:
+        # A section whose thread is mostly idle (its work runs on other
+        # threads, e.g. V8's off-thread Wasm compile) cannot be fixed by more
+        # runs: report it instead of chasing it.
+        def idle(v):
+            return v["samples"] / max(v["ms"], 1e-9) * 1000 < 0.5 * args.rate
         low = {k: v for k, v in summary["sections"].items()
-               if v["samples"] < args.min_samples and not v["baseline"]}
+               if v["samples"] < args.min_samples and not v["baseline"] and not idle(v)}
         if not low or len(runs) >= args.max_runs:
             break
         per_run = min(max(v["samples"], 1) / len(runs) for v in low.values())
@@ -195,8 +200,10 @@ def main():
     ok = True
     for name, v in summary["sections"].items():
         enough = v["samples"] >= args.min_samples
-        flag = "baseline" if v["baseline"] else ("ok" if enough else f"LOW (< {args.min_samples})")
-        ok &= enough or v["baseline"]
+        offthread = v["samples"] / max(v["ms"], 1e-9) * 1000 < 0.5 * args.rate
+        flag = ("baseline" if v["baseline"] else "ok" if enough
+                else "off-thread (sampled thread mostly idle)" if offthread else f"LOW (< {args.min_samples})")
+        ok &= enough or v["baseline"] or offthread
         print(f"  {name:28} {v['samples']:8} samples  {v['spans']:4} spans  {v['ms']:9.1f} ms  "
               f"{v['samples'] / max(v['ms'], 1e-9) * 1000:7.0f} samples/s  {flag}")
     print(f"\nsamply load {stitched}\npython3 -I tools/top.py {stitched}")

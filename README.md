@@ -63,11 +63,13 @@ python3 -I tools/matrix.py [--jsc PATH] [--repeat N] [--preset P] [--engines chr
 repro/run.sh [jsc]          # minimal standalone cases, PASS/FAIL per engine
 python3 -I tools/parity.py  # every build x workload x engine; maps failures to repro/
 ```
+Status on WebKit trunk 5b65d918e3c7 (Release jsc, 2026-11-23): both pass, and
+`tools/parity.py` is clean. Both still fail in Safari 27.0.1's system JSC.
 - `jspi-cross-instance-tail-call`: a JSPI suspend under a cross-instance
-  `return_call` fails with `RestoreFrameMode`. Breaks every `debug-jspi`
-  build. Still in trunk (Oct 10).
-- `module-exports`: `Module.exports` throws on GC-typed signatures. Seen in
-  Safari 27.0.1; fixed in trunk.
+  `return_call` failed with `RestoreFrameMode` and broke every `debug-jspi`
+  build. Fixed by bug 329633 (b31098b98f7b) in the default slab slicer; the
+  frag slicer still has a FIXME, but it is compiled out.
+- `module-exports`: `Module.exports` threw on GC-typed signatures.
 
 ## Profiling (samply, signposted, stitched)
 ```sh
@@ -83,6 +85,11 @@ samply load profiles/<stamp>/stitched.json.gz              # UI
   baseline has `--min-samples` samples (default 10000; `--max-runs` 50). The
   final line per section prints `ok`, `LOW` or `baseline`, and the exit
   status is non-zero if any section is `LOW`.
+- **Off-thread work:** a section whose sampled thread is mostly idle (its
+  work runs elsewhere, like V8's off-thread compile) is reported, not chased.
+- **Breakdowns:** `tools/top.py --categories` buckets self time (stack walk,
+  stack copy, host functions, malloc, promise, JIT…), and `--callees REGEX`
+  splits a function's time by callee.
 - **Run length:** `iters=30` is the default. Raise `n=` or `iters=` for
   short cases.
 - **WebKit-build jsc:** samply launches it with JITDump, so JIT/Wasm frames
@@ -111,3 +118,4 @@ python3 -I tools/run.py --browser cmd --cmd '/path/MiniBrowser --url {url}' --pr
 - **CPU frequency** is not pinned: pin it yourself for real numbers.
 
 `plan.md` covers the design and how the implementation differs from it.
+`findings.md` holds the conclusions; `analysis.md` holds the profile deep-dive.

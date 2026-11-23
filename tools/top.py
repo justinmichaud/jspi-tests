@@ -62,11 +62,34 @@ def symbolicate(server, libs, addrs):
     return out
 
 
+# --categories: self time bucketed by the first matching rule (JSC names; V8's
+# are stripped on macOS, so Chrome mostly splits into jit / memmove / other).
+CATEGORIES = [
+    ("stack walk", r"StackVisitor|SlabSlicer::step|FragSlicer::step|StackSlicerFunctor|PCToCodeOriginMap|unwindTo|calleeSaveRegisters|readInlinableNativeCalleeFrame|readNonInlinedFrame|readFrame|lexicalGlobalObjectFromNativeCallee|RegisterSet::stackRegisters"),
+    ("stack copy", r"_platform_memmove|memcpy|memmove"),
+    ("slice evacuate/restore", r"EvacuatedStack|evacuatePendingSlice|commitPendingSlice|PinballCompletion|SlicerDriver|restoreSlice|Pinball|JSPIContext"),
+    ("host fn per suspend", r"getHostFunction|WeakNativeExecutableHash|JITThunks|HashTable<JSC::Weak<JSC::NativeExecutable|JSFunctionWithFields|NativeExecutable|createPinball"),
+    ("strings", r"StringImpl|WTF::equal\b|WTF::String"),
+    ("promise/microtask", r"Promise|Microtask|runPromiseReactionJob|DeferredWork"),
+    ("call/entry/exit", r"executeCall|JSToWasm|WasmToJS|operationJSToWasm|vmEntry|callToJavaScript|operationConvert|Interpreter::|getCallData|JSC::call\b"),
+    ("malloc/free", r"^pas_|fastMalloc|fastFree|fastCompact|bmalloc|^malloc|^free|_xzm|libpas"),
+    ("GC", r"Heap::|MarkedBlock|SlotVisitor|MarkedSpace|GCClient|Subspace|MarkedVector|LocalAllocator"),
+    ("refcount", r"::deref\(|::ref\(|RefCounted"),
+    ("wasm/JS JIT code", r"^\[jit\]|\[jit-|JSC-|Wasm|wasm-function|^0x[0-9a-f]+  \[jit"),
+    ("chrome native (stripped)", r"\[Google Chrome Framework\]|\[Google Chrome for Testing Framework\]"),
+    ("system libs", r"\[lib[^\]]*\.dylib\]"),
+]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("profile")
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--thread", default="")
+    ap.add_argument("--callees", action="append", default=[],
+                    help="regex (repeatable): break the time under this function down by direct callee")
+    ap.add_argument("--no-flat", action="store_true", help="only the --callees breakdowns")
+    ap.add_argument("--categories", action="store_true", help="self time bucketed (see CATEGORIES)")
     args = ap.parse_args()
     ensure()
     p = json.load(gzip.open(args.profile))
@@ -117,13 +140,46 @@ def main():
                 for n in seen:
                     incl_name[n] += 1
             print(f"\n== {th['name']}  ({total} samples)")
-            print("   self%  incl%  function")
-            selfn = by_name(self_c)
-            for n, c in selfn.most_common(args.top):
-                print(f"  {100 * c / total:6.1f} {100 * incl_name[n] / total:6.1f}  {n}")
-            print("   top inclusive (frames present in every sample omitted):")
-            for n, c in [x for x in incl_name.most_common() if x[1] < total][: args.top]:
-                print(f"  {100 * selfn[n] / total:6.1f} {100 * c / total:6.1f}  {n}")
+            if not args.no_flat:
+                print("   self%  incl%  function")
+                selfn = by_name(self_c)
+                for n, c in selfn.most_common(args.top):
+                    print(f"  {100 * c / total:6.1f} {100 * incl_name[n] / total:6.1f}  {n}")
+                print("   top inclusive (frames in >95% of samples omitted):")
+                for n, c in [x for x in incl_name.most_common() if x[1] < 0.95 * total][: args.top]:
+                    print(f"  {100 * selfn[n] / total:6.1f} {100 * c / total:6.1f}  {n}")
+            if args.categories:
+                rules = [(c, re.compile(r)) for c, r in CATEGORIES]
+                cat = collections.Counter()
+                for n, c in by_name(self_c).items():
+                    cat[next((name for name, r in rules if r.search(n)), "other")] += c
+                print("   self time by category:")
+                for c_name, c in cat.most_common():
+                    print(f"  {100 * c / total:6.1f}  {c_name}")
+                others = collections.Counter({n: c for n, c in by_name(self_c).items()
+                                              if not any(r.search(n) for _, r in rules)})
+                if others:
+                    print("   largest in other: " + "; ".join(f"{n.split('  [')[0][:50]} {100 * c / total:.1f}"
+                                                         for n, c in others.most_common(6)))
+            for callee_re in args.callees:
+                pat = re.compile(callee_re)
+                under, kids = 0, collections.Counter()
+                for s0 in th["samples"]["stack"]:
+                    chain = []
+                    s = s0
+                    while s is not None:
+                        chain.append(names.get(key(st["frame"][s]), "[jit]"))
+                        s = st["prefix"][s]
+                    chain.reverse()  # root first
+                    for i, n in enumerate(chain):
+                        if pat.search(n):
+                            under += 1
+                            kids[chain[i + 1] if i + 1 < len(chain) else "(self)"] += 1
+                            break
+                if under:
+                    print(f"   under /{callee_re}/: {100 * under / total:.1f}% of samples; by direct callee:")
+                    for n, c in kids.most_common(args.top):
+                        print(f"  {100 * c / total:6.1f}  {n}")
     finally:
         proc.terminate()
 
